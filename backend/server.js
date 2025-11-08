@@ -6,8 +6,11 @@ const StreamZip = require('node-stream-zip');
 const { parse } = require('csv-parse/sync');
 const GtfsRealtimeBindings = require('gtfs-realtime-bindings');
 
+loadEnvFromFile();
+
 const STATIC_ZIP_PATH = path.join(__dirname, '..', 'google_transit.zip');
 const VEHICLE_POSITIONS_PATH = path.join(__dirname, '..', 'VehiclePositions.pb');
+const VEHICLE_POSITIONS_URL = process.env.GTFS_VEHICLE_POSITIONS_URL || null;
 
 const PORT = Number(process.env.PORT) || 4000;
 
@@ -167,7 +170,7 @@ function parseCsv(contents) {
 }
 
 async function loadVehiclePositions() {
-  const buffer = await fs.promises.readFile(VEHICLE_POSITIONS_PATH);
+  const buffer = await readVehicleFeedBuffer();
   const feed = GtfsRealtimeBindings.transit_realtime.FeedMessage.decode(buffer);
 
   return feed.entity
@@ -200,6 +203,18 @@ async function loadVehiclePositions() {
     });
 }
 
+async function readVehicleFeedBuffer() {
+  if (VEHICLE_POSITIONS_URL) {
+    const response = await fetch(VEHICLE_POSITIONS_URL);
+    if (!response.ok) {
+      throw new Error(`Failed to download vehicle positions (${response.status})`);
+    }
+    const arrayBuffer = await response.arrayBuffer();
+    return Buffer.from(arrayBuffer);
+  }
+  return fs.promises.readFile(VEHICLE_POSITIONS_PATH);
+}
+
 function parseFloatSafe(value) {
   const number = Number.parseFloat(value);
   return Number.isFinite(number) ? number : null;
@@ -211,4 +226,30 @@ function parseIntSafe(value) {
   }
   const number = Number.parseInt(value, 10);
   return Number.isFinite(number) ? number : null;
+}
+
+function loadEnvFromFile() {
+  const envPath = path.join(__dirname, '..', '.env');
+  if (!fs.existsSync(envPath)) {
+    return;
+  }
+
+  const contents = fs.readFileSync(envPath, 'utf8');
+  contents
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .forEach((line) => {
+      if (!line || line.startsWith('#')) {
+        return;
+      }
+      const equalsIndex = line.indexOf('=');
+      if (equalsIndex === -1) {
+        return;
+      }
+      const key = line.slice(0, equalsIndex).trim();
+      const value = line.slice(equalsIndex + 1).trim();
+      if (key && !(key in process.env)) {
+        process.env[key] = value;
+      }
+    });
 }

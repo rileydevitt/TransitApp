@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Constants from 'expo-constants';
+import * as Location from 'expo-location';
 import { StatusBar } from 'expo-status-bar';
 import {
   ActivityIndicator,
@@ -17,6 +17,15 @@ import {
 } from 'react-native';
 import MapView, { Marker, Polyline } from 'react-native-maps';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import resolveApiBaseUrl from './src/utils/resolveApiBaseUrl';
+import normaliseColor from './src/utils/normaliseColor';
+import isFiniteNumber from './src/utils/isFiniteNumber';
+import formatTime from './src/utils/formatTime';
+import clamp from './src/utils/clamp';
+import estimateEtaMinutes from './src/utils/estimateEtaMinutes';
+import estimateEtaToStop from './src/utils/estimateEtaToStop';
+import haversineDistanceKm from './src/utils/haversineDistanceKm';
+import formatRelativeTime from './src/utils/formatRelativeTime';
 
 const HALIFAX_REGION = {
   latitude: 44.6488,
@@ -25,12 +34,14 @@ const HALIFAX_REGION = {
   longitudeDelta: 0.15
 };
 
-const REFRESH_INTERVAL_MS = 5_000;
+const REFRESH_INTERVAL_MS = 3_000;
 const STALE_THRESHOLD_MS = 45_000;
 
 const WINDOW_HEIGHT = Dimensions.get('window').height;
-const EXPANDED_DRAWER_TRANSLATE = Platform.select({ ios: 90, android: 110, default: 100 });
+const BASE_EXPANDED_DRAWER_TRANSLATE = Platform.select({ ios: 90, android: 110, default: 100 });
 const DEFAULT_COLLAPSED_DRAWER_TRANSLATE = Platform.select({ ios: 300, android: 320, default: 300 });
+const MAX_DRAWER_COVERAGE = 0.9;
+const MIN_TOP_GAP = WINDOW_HEIGHT * (1 - MAX_DRAWER_COVERAGE);
 
 const API_BASE_URL = resolveApiBaseUrl();
 
@@ -40,6 +51,7 @@ export default function App() {
   const [trips, setTrips] = useState([]);
   const [vehicles, setVehicles] = useState([]);
   const [selectedVehicleId, setSelectedVehicleId] = useState(null);
+  const [selectedStopId, setSelectedStopId] = useState(null);
   const [loadingStatic, setLoadingStatic] = useState(true);
   const [staticError, setStaticError] = useState(null);
   const [realtimeError, setRealtimeError] = useState(null);
@@ -47,9 +59,12 @@ export default function App() {
   const [shapeError, setShapeError] = useState(null);
   const [now, setNow] = useState(() => new Date());
   const [sheetHeight, setSheetHeight] = useState(null);
+  const [userLocation, setUserLocation] = useState(null);
+  const [locationError, setLocationError] = useState(null);
   const drawerTranslateY = useRef(new Animated.Value(DEFAULT_COLLAPSED_DRAWER_TRANSLATE)).current;
   const drawerValueRef = useRef(DEFAULT_COLLAPSED_DRAWER_TRANSLATE);
   const hasPositionedSheet = useRef(false);
+  const mapRef = useRef(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -92,6 +107,55 @@ export default function App() {
     const interval = setInterval(() => setNow(new Date()), 30_000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const requestLocation = async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') {
+          throw new Error('Location permission denied');
+        }
+        const position = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced
+        });
+        if (cancelled) {
+          return;
+        }
+        setUserLocation({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude
+        });
+        setLocationError(null);
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        console.error('Unable to fetch user location', error);
+        setLocationError(error.message);
+      }
+    };
+
+    requestLocation();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!userLocation || !mapRef.current) {
+      return;
+    }
+    mapRef.current.animateCamera(
+      {
+        center: userLocation,
+        zoom: 14
+      },
+      { duration: 800 }
+    );
+  }, [userLocation]);
 
   useEffect(() => {
     let cancelled = false;
@@ -214,12 +278,14 @@ export default function App() {
     return null;
   }, [routesById, selectedTrip, selectedVehicle]);
 
+  const activeStopId = selectedStopId ?? selectedVehicle?.stopId ?? null;
+
   const selectedStop = useMemo(() => {
-    if (!selectedVehicle?.stopId) {
+    if (!activeStopId) {
       return null;
     }
-    return stopsById.get(selectedVehicle.stopId) ?? null;
-  }, [selectedVehicle, stopsById]);
+    return stopsById.get(activeStopId) ?? null;
+  }, [activeStopId, stopsById]);
 
   useEffect(() => {
     const shapeId = selectedTrip?.shape_id;
@@ -306,6 +372,9 @@ export default function App() {
     if (realtimeError) {
       return 'Realtime feed unreachable. Showing last known locations.';
     }
+    if (locationError) {
+      return 'Location unavailable. Enable permissions to center on you.';
+    }
     return null;
   })();
 
@@ -319,6 +388,11 @@ export default function App() {
     [selectedRoute, selectedVehicle]
   );
 
+  const expandedDrawerTranslate = useMemo(
+    () => Math.max(BASE_EXPANDED_DRAWER_TRANSLATE, MIN_TOP_GAP),
+    []
+  );
+
   const collapsedDrawerTranslate = useMemo(() => {
     if (!sheetHeight) {
       return DEFAULT_COLLAPSED_DRAWER_TRANSLATE;
@@ -327,10 +401,10 @@ export default function App() {
     const translate = sheetHeight - visibleTarget;
     return clamp(
       translate,
-      EXPANDED_DRAWER_TRANSLATE,
+      expandedDrawerTranslate,
       Math.max(sheetHeight, DEFAULT_COLLAPSED_DRAWER_TRANSLATE)
     );
-  }, [sheetHeight]);
+  }, [expandedDrawerTranslate, sheetHeight]);
 
   useEffect(() => {
     if (!sheetHeight || hasPositionedSheet.current) {
@@ -370,26 +444,31 @@ export default function App() {
       onPanResponderMove: (_, gesture) => {
         const next = clamp(
           dragOrigin + gesture.dy,
-          EXPANDED_DRAWER_TRANSLATE,
+          expandedDrawerTranslate,
           collapsedDrawerTranslate
         );
         drawerTranslateY.setValue(next);
       },
       onPanResponderRelease: (_, gesture) => {
-        const midpoint = (EXPANDED_DRAWER_TRANSLATE + collapsedDrawerTranslate) / 2;
+        const midpoint = (expandedDrawerTranslate + collapsedDrawerTranslate) / 2;
         const shouldExpand =
           gesture.vy < -0.2
             ? true
             : gesture.vy > 0.2
             ? false
             : drawerValueRef.current < midpoint;
-        animateDrawer(shouldExpand ? EXPANDED_DRAWER_TRANSLATE : collapsedDrawerTranslate);
+        animateDrawer(shouldExpand ? expandedDrawerTranslate : collapsedDrawerTranslate);
       }
     });
-  }, [animateDrawer, collapsedDrawerTranslate, drawerTranslateY]);
+  }, [animateDrawer, collapsedDrawerTranslate, drawerTranslateY, expandedDrawerTranslate]);
+
+  useEffect(() => {
+    if (selectedStopId) {
+      animateDrawer(expandedDrawerTranslate);
+    }
+  }, [animateDrawer, expandedDrawerTranslate, selectedStopId]);
 
   const routeCards = useMemo(() => {
-    const nowMs = Date.now();
     const items = [];
     const seen = new Set();
 
@@ -402,6 +481,7 @@ export default function App() {
         return;
       }
       seen.add(key);
+      const etaMinutes = estimateEtaMinutes(vehicle.timestampMs);
       items.push({
         id: key,
         routeId: route?.route_id ?? vehicle.routeId ?? null,
@@ -409,9 +489,7 @@ export default function App() {
           route?.route_short_name ?? route?.route_long_name ?? vehicle.routeId ?? 'Route',
         headsign: trip?.trip_headsign ?? route?.route_long_name ?? 'Headsign unavailable',
         stopLabel: stop?.stop_name ?? 'Stop info coming soon',
-        etaMinutes: vehicle.timestampMs
-          ? Math.max(1, 5 + Math.round((nowMs - vehicle.timestampMs) / 60000))
-          : null,
+        etaMinutes,
         warning: vehicle.congestionLevel === 'severe' ? 'Delayed' : null,
         vehicleId: vehicle.id,
         isStale: staleVehicles.has(vehicle.id),
@@ -437,17 +515,133 @@ export default function App() {
     return items.slice(0, 5);
   }, [routes, routesById, staleVehicles, stopsById, tripsById, vehicles]);
 
+  const stopArrivals = useMemo(() => {
+    if (!selectedStopId || !selectedStop) {
+      return [];
+    }
+    return vehicles
+      .map((vehicle) => {
+        const distanceKm = haversineDistanceKm(
+          vehicle.latitude,
+          vehicle.longitude,
+          Number(selectedStop.stop_lat),
+          Number(selectedStop.stop_lon)
+        );
+        if (!Number.isFinite(distanceKm)) {
+          return null;
+        }
+        const route = vehicle.routeId ? routesById.get(vehicle.routeId) : null;
+        const trip = vehicle.tripId ? tripsById.get(vehicle.tripId) : null;
+        const etaMinutes = estimateEtaToStop(distanceKm, vehicle.speed);
+        return {
+          id: vehicle.id,
+          routeLabel:
+            route?.route_short_name ?? route?.route_long_name ?? vehicle.routeId ?? 'Route',
+          headsign: trip?.trip_headsign ?? 'Inbound service',
+          etaMinutes,
+          timestamp: vehicle.timestamp,
+          distanceLabel:
+            distanceKm < 1
+              ? `${(distanceKm * 1000).toFixed(0)} m away`
+              : `${distanceKm.toFixed(1)} km away`,
+          isStale: staleVehicles.has(vehicle.id)
+        };
+      })
+      .filter((item) => item && item.etaMinutes !== null && item.etaMinutes < 120)
+      .sort((a, b) => (a.etaMinutes ?? Infinity) - (b.etaMinutes ?? Infinity));
+  }, [routesById, selectedStop, selectedStopId, staleVehicles, tripsById, vehicles]);
+
+  const isStopFocused = Boolean(selectedStopId && selectedStop);
+
+  const clearStopFocus = useCallback(() => setSelectedStopId(null), []);
+
+  const renderRouteCard = useCallback(
+    ({ item }) => {
+      const isActive = Boolean(activeRouteId && item.routeId === activeRouteId);
+      return (
+        <TouchableOpacity
+          style={[styles.routeCard, isActive && styles.routeCardActive]}
+          activeOpacity={0.85}
+          onPress={() => {
+            if (item.vehicleId) {
+              setSelectedStopId(null);
+              setSelectedVehicleId(item.vehicleId);
+            }
+          }}
+        >
+          <View style={styles.routeBadgeColumn}>
+            <Text style={[styles.routeBadgeText, isActive && styles.routeBadgeTextActive]}>
+              {item.routeLabel}
+            </Text>
+            {item.warning ? (
+              <MaterialCommunityIcons
+                name="alert-circle"
+                size={16}
+                color="#ffdd55"
+                style={styles.routeWarningIcon}
+              />
+            ) : null}
+          </View>
+          <View style={styles.routeBody}>
+            <Text style={styles.routeTitle} numberOfLines={1}>
+              {item.headsign}
+            </Text>
+            <Text style={styles.routeSubtitle} numberOfLines={1}>
+              {item.stopLabel}
+            </Text>
+            {item.updatedLabel ? <Text style={styles.routeUpdated}>{item.updatedLabel}</Text> : null}
+          </View>
+          <View style={styles.routeMeta}>
+            <Text style={[styles.etaText, isActive && styles.etaTextActive]}>
+              {item.etaMinutes ? `${item.etaMinutes}` : '—'}
+            </Text>
+            <Text style={styles.etaCaption}>minutes</Text>
+            <MaterialCommunityIcons
+              name="access-point"
+              size={18}
+              color={item.isStale ? '#7a8fa6' : '#77f0ff'}
+            />
+          </View>
+        </TouchableOpacity>
+      );
+    },
+    [activeRouteId]
+  );
+
+  const renderStopArrival = useCallback(({ item }) => (
+    <View style={styles.arrivalCard}>
+      <View style={styles.arrivalRouteBadge}>
+        <Text style={styles.arrivalRouteText}>{item.routeLabel}</Text>
+      </View>
+      <View style={styles.arrivalBody}>
+        <Text style={styles.arrivalTitle} numberOfLines={1}>
+          {item.headsign}
+        </Text>
+        <Text style={styles.arrivalSubtitle}>
+          {item.distanceLabel} · updated {item.timestamp ? formatTime(item.timestamp) : 'recently'}
+        </Text>
+      </View>
+      <View style={styles.arrivalEtaBlock}>
+        <Text style={styles.arrivalEta}>{item.etaMinutes ? `${item.etaMinutes}` : '—'}</Text>
+        <Text style={styles.arrivalEtaCaption}>min</Text>
+      </View>
+    </View>
+  ), []);
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar style="light" />
       <View style={styles.container}>
         <MapView
+          ref={mapRef}
           style={StyleSheet.absoluteFill}
           initialRegion={HALIFAX_REGION}
           showsCompass={false}
+          showsUserLocation
           showsMyLocationButton={false}
           customMapStyle={DARK_MAP_STYLE}
           provider="google"
+          onPress={clearStopFocus}
         >
           {selectedShapeCoordinates ? (
             <Polyline
@@ -472,11 +666,38 @@ export default function App() {
                 }}
                 pinColor={isSelected ? '#FF9900' : '#00558C'}
                 opacity={staleVehicles.has(vehicle.id) ? 0.5 : 1}
-                onPress={() => setSelectedVehicleId(vehicle.id)}
+                onPress={() => {
+                  setSelectedStopId(null);
+                  setSelectedVehicleId(vehicle.id);
+                }}
               >
                 <View style={styles.markerLabel}>
                   <Text style={styles.markerText}>{displayLabel}</Text>
                 </View>
+              </Marker>
+            );
+          })}
+
+          {stops.map((stop) => {
+            const latitude = Number(stop.stop_lat);
+            const longitude = Number(stop.stop_lon);
+            if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+              return null;
+            }
+            const isFocused = selectedStopId === stop.stop_id;
+            return (
+              <Marker
+                key={`stop-${stop.stop_id}`}
+                coordinate={{ latitude, longitude }}
+                anchor={{ x: 0.5, y: 0.5 }}
+                tracksViewChanges={false}
+                onPress={(event) => {
+                  event.stopPropagation();
+                  setSelectedVehicleId(null);
+                  setSelectedStopId(stop.stop_id);
+                }}
+              >
+                <View style={[styles.stopDot, isFocused && styles.stopDotActive]} />
               </Marker>
             );
           })}
@@ -512,7 +733,7 @@ export default function App() {
             <TouchableOpacity
               activeOpacity={0.9}
               style={styles.searchBar}
-              onPress={() => animateDrawer(EXPANDED_DRAWER_TRANSLATE)}
+              onPress={() => animateDrawer(expandedDrawerTranslate)}
             >
               <Ionicons name="search" size={20} color="#daf6db" />
               <TextInput
@@ -532,140 +753,68 @@ export default function App() {
             <Text style={styles.sheetWarning}>Unable to load route shape: {shapeError}</Text>
           ) : null}
 
-          <FlatList
-            data={routeCards}
-            keyExtractor={(item) => item.id}
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={styles.routesList}
-            ItemSeparatorComponent={() => <View style={styles.routeDivider} />}
-            ListHeaderComponent={
-              <View style={styles.listHeader}>
-                <Text style={styles.listTitle}>Nearby routes</Text>
-                <Text style={styles.listSubtitle}>Live arrivals refresh every few seconds.</Text>
-              </View>
-            }
-            ListEmptyComponent={
-              <View style={styles.emptyState}>
-                <Text style={styles.emptyTitle}>No buses to show</Text>
-                <Text style={styles.emptySubtitle}>
-                  We will list service here as soon as the realtime feed reports vehicles.
-                </Text>
-              </View>
-            }
-            renderItem={({ item }) => {
-              const isActive = Boolean(activeRouteId && item.routeId === activeRouteId);
-              return (
+          {isStopFocused ? (
+            <>
+              <View style={styles.stopHeader}>
+                <View>
+                  <Text style={styles.stopTitle}>{selectedStop?.stop_name ?? 'Stop'}</Text>
+                  <Text style={styles.stopSubtitle}>
+                    Stop #{selectedStop?.stop_id ?? selectedStopId}
+                  </Text>
+                </View>
                 <TouchableOpacity
-                  style={[styles.routeCard, isActive && styles.routeCardActive]}
-                  activeOpacity={0.85}
-                  onPress={() => item.vehicleId && setSelectedVehicleId(item.vehicleId)}
+                  accessibilityLabel="Close stop details"
+                  onPress={clearStopFocus}
+                  style={styles.stopCloseButton}
                 >
-                  <View style={styles.routeBadgeColumn}>
-                    <Text style={[styles.routeBadgeText, isActive && styles.routeBadgeTextActive]}>
-                      {item.routeLabel}
-                    </Text>
-                    {item.warning ? (
-                      <MaterialCommunityIcons
-                        name="alert-circle"
-                        size={16}
-                        color="#ffdd55"
-                        style={styles.routeWarningIcon}
-                      />
-                    ) : null}
-                  </View>
-                  <View style={styles.routeBody}>
-                    <Text style={styles.routeTitle} numberOfLines={1}>
-                      {item.headsign}
-                    </Text>
-                    <Text style={styles.routeSubtitle} numberOfLines={1}>
-                      {item.stopLabel}
-                    </Text>
-                    {item.updatedLabel ? (
-                      <Text style={styles.routeUpdated}>{item.updatedLabel}</Text>
-                    ) : null}
-                  </View>
-                  <View style={styles.routeMeta}>
-                    <Text style={[styles.etaText, isActive && styles.etaTextActive]}>
-                      {item.etaMinutes ? `${item.etaMinutes}` : '—'}
-                    </Text>
-                    <Text style={styles.etaCaption}>minutes</Text>
-                    <MaterialCommunityIcons
-                      name="access-point"
-                      size={18}
-                      color={item.isStale ? '#7a8fa6' : '#77f0ff'}
-                    />
-                  </View>
+                  <Ionicons name="close" size={18} color="#0a2239" />
                 </TouchableOpacity>
-              );
-            }}
-          />
+              </View>
+              <FlatList
+                data={stopArrivals}
+                keyExtractor={(item) => item.id}
+                contentContainerStyle={styles.routesList}
+                ListEmptyComponent={
+                  <View style={styles.emptyState}>
+                    <Text style={styles.emptyTitle}>No buses approaching</Text>
+                    <Text style={styles.emptySubtitle}>
+                      We will post arrivals here as soon as vehicles report this stop.
+                    </Text>
+                  </View>
+                }
+                renderItem={renderStopArrival}
+              />
+            </>
+          ) : (
+            <FlatList
+              data={routeCards}
+              keyExtractor={(item) => item.id}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.routesList}
+              ItemSeparatorComponent={() => <View style={styles.routeDivider} />}
+              ListHeaderComponent={
+                <View style={styles.listHeader}>
+                  <Text style={styles.listTitle}>Nearby routes</Text>
+                  <Text style={styles.listSubtitle}>Live arrivals refresh every few seconds.</Text>
+                </View>
+              }
+              ListEmptyComponent={
+                <View style={styles.emptyState}>
+                  <Text style={styles.emptyTitle}>No buses to show</Text>
+                  <Text style={styles.emptySubtitle}>
+                    We will list service here as soon as the realtime feed reports vehicles.
+                  </Text>
+                </View>
+              }
+              renderItem={renderRouteCard}
+            />
+          )}
         </Animated.View>
       </View>
     </SafeAreaView>
   );
 }
 
-function resolveApiBaseUrl() {
-  if (process.env.EXPO_PUBLIC_API_BASE_URL) {
-    return process.env.EXPO_PUBLIC_API_BASE_URL;
-  }
-
-  const hostUri = Constants.expoConfig?.hostUri;
-  if (hostUri) {
-    const host = hostUri.split(':')[0];
-    if (host) {
-      return `http://${host}:4000`;
-    }
-  }
-
-  return 'http://localhost:4000';
-}
-
-function normaliseColor(value, fallback) {
-  if (!value) {
-    return fallback;
-  }
-  return value.startsWith('#') ? value : `#${value}`;
-}
-
-function isFiniteNumber(value) {
-  return typeof value === 'number' && Number.isFinite(value);
-}
-
-function formatTime(value) {
-  try {
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) {
-      return 'unavailable';
-    }
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  } catch (error) {
-    return 'unavailable';
-  }
-}
-
-function clamp(value, min, max) {
-  return Math.max(min, Math.min(max, value));
-}
-
-function formatRelativeTime(timestampMs) {
-  if (typeof timestampMs !== 'number') {
-    return null;
-  }
-  const diff = Date.now() - timestampMs;
-  if (diff < 0) {
-    return 'just now';
-  }
-  const minutes = Math.round(diff / 60000);
-  if (minutes < 1) {
-    return 'Just now';
-  }
-  if (minutes < 60) {
-    return `${minutes}m ago`;
-  }
-  const hours = Math.round(minutes / 60);
-  return `${hours}h ago`;
-}
 
 const styles = StyleSheet.create({
   safeArea: {
@@ -707,6 +856,20 @@ const styles = StyleSheet.create({
     color: '#0a2239',
     fontWeight: '700',
     fontSize: 12
+  },
+  stopDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#1f8b4c',
+    borderWidth: 2,
+    borderColor: '#0a2239'
+  },
+  stopDotActive: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#4ee88d'
   },
   loadingOverlay: {
     position: 'absolute',
@@ -819,6 +982,31 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
     flexGrow: 1
   },
+  stopHeader: {
+    marginTop: 16,
+    marginBottom: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between'
+  },
+  stopTitle: {
+    color: '#f3f6ff',
+    fontSize: 20,
+    fontWeight: '700'
+  },
+  stopSubtitle: {
+    color: '#7a8fa6',
+    fontSize: 12,
+    marginTop: 4
+  },
+  stopCloseButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#2de1fc',
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
   listHeader: {
     marginTop: 20,
     marginBottom: 12
@@ -899,6 +1087,55 @@ const styles = StyleSheet.create({
   },
   routeDivider: {
     height: 12
+  },
+  arrivalCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0f1f3f',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 12
+  },
+  arrivalRouteBadge: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: '#0c793a',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 16
+  },
+  arrivalRouteText: {
+    color: '#daf6db',
+    fontSize: 16,
+    fontWeight: '800'
+  },
+  arrivalBody: {
+    flex: 1
+  },
+  arrivalTitle: {
+    color: '#f3f6ff',
+    fontSize: 16,
+    fontWeight: '600'
+  },
+  arrivalSubtitle: {
+    color: '#7a8fa6',
+    fontSize: 12,
+    marginTop: 4
+  },
+  arrivalEtaBlock: {
+    alignItems: 'flex-end',
+    marginLeft: 12
+  },
+  arrivalEta: {
+    color: '#2de1fc',
+    fontSize: 24,
+    fontWeight: '800'
+  },
+  arrivalEtaCaption: {
+    color: '#7a8fa6',
+    fontSize: 12,
+    marginTop: 2
   },
   emptyState: {
     alignItems: 'center',
