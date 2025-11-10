@@ -42,6 +42,8 @@ const BASE_EXPANDED_DRAWER_TRANSLATE = Platform.select({ ios: 90, android: 110, 
 const DEFAULT_COLLAPSED_DRAWER_TRANSLATE = Platform.select({ ios: 300, android: 320, default: 300 });
 const MAX_DRAWER_COVERAGE = 0.9;
 const MIN_TOP_GAP = WINDOW_HEIGHT * (1 - MAX_DRAWER_COVERAGE);
+const STOP_FOCUSED_TOP_GAP = Platform.select({ ios: 16, android: 24, default: 20 });
+const STOP_VISIBILITY_DELTA = 0.03;
 
 const API_BASE_URL = resolveApiBaseUrl();
 
@@ -61,6 +63,7 @@ export default function App() {
   const [sheetHeight, setSheetHeight] = useState(null);
   const [userLocation, setUserLocation] = useState(null);
   const [locationError, setLocationError] = useState(null);
+  const [mapRegion, setMapRegion] = useState(HALIFAX_REGION);
   const drawerTranslateY = useRef(new Animated.Value(DEFAULT_COLLAPSED_DRAWER_TRANSLATE)).current;
   const drawerValueRef = useRef(DEFAULT_COLLAPSED_DRAWER_TRANSLATE);
   const hasPositionedSheet = useRef(false);
@@ -287,6 +290,18 @@ export default function App() {
     return stopsById.get(activeStopId) ?? null;
   }, [activeStopId, stopsById]);
 
+  const isStopFocused = useMemo(
+    () => Boolean(selectedStopId && selectedStop),
+    [selectedStop, selectedStopId]
+  );
+
+  const showStops = useMemo(() => {
+    if (!mapRegion) {
+      return false;
+    }
+    return mapRegion.latitudeDelta <= STOP_VISIBILITY_DELTA;
+  }, [mapRegion]);
+
   useEffect(() => {
     const shapeId = selectedTrip?.shape_id;
     if (!shapeId || shapeCache.has(shapeId)) {
@@ -388,10 +403,10 @@ export default function App() {
     [selectedRoute, selectedVehicle]
   );
 
-  const expandedDrawerTranslate = useMemo(
-    () => Math.max(BASE_EXPANDED_DRAWER_TRANSLATE, MIN_TOP_GAP),
-    []
-  );
+  const expandedDrawerTranslate = useMemo(() => {
+    const topGap = isStopFocused ? STOP_FOCUSED_TOP_GAP : MIN_TOP_GAP;
+    return Math.max(BASE_EXPANDED_DRAWER_TRANSLATE, topGap);
+  }, [isStopFocused]);
 
   const collapsedDrawerTranslate = useMemo(() => {
     if (!sheetHeight) {
@@ -463,10 +478,10 @@ export default function App() {
   }, [animateDrawer, collapsedDrawerTranslate, drawerTranslateY, expandedDrawerTranslate]);
 
   useEffect(() => {
-    if (selectedStopId) {
+    if (isStopFocused) {
       animateDrawer(expandedDrawerTranslate);
     }
-  }, [animateDrawer, expandedDrawerTranslate, selectedStopId]);
+  }, [animateDrawer, expandedDrawerTranslate, isStopFocused]);
 
   const routeCards = useMemo(() => {
     const items = [];
@@ -550,8 +565,6 @@ export default function App() {
       .filter((item) => item && item.etaMinutes !== null && item.etaMinutes < 120)
       .sort((a, b) => (a.etaMinutes ?? Infinity) - (b.etaMinutes ?? Infinity));
   }, [routesById, selectedStop, selectedStopId, staleVehicles, tripsById, vehicles]);
-
-  const isStopFocused = Boolean(selectedStopId && selectedStop);
 
   const clearStopFocus = useCallback(() => setSelectedStopId(null), []);
 
@@ -641,6 +654,7 @@ export default function App() {
           showsMyLocationButton={false}
           customMapStyle={DARK_MAP_STYLE}
           provider="google"
+          onRegionChangeComplete={(region) => setMapRegion(region)}
           onPress={clearStopFocus}
         >
           {selectedShapeCoordinates ? (
@@ -678,29 +692,31 @@ export default function App() {
             );
           })}
 
-          {stops.map((stop) => {
-            const latitude = Number(stop.stop_lat);
-            const longitude = Number(stop.stop_lon);
-            if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
-              return null;
-            }
-            const isFocused = selectedStopId === stop.stop_id;
-            return (
-              <Marker
-                key={`stop-${stop.stop_id}`}
-                coordinate={{ latitude, longitude }}
-                anchor={{ x: 0.5, y: 0.5 }}
-                tracksViewChanges={false}
-                onPress={(event) => {
-                  event.stopPropagation();
-                  setSelectedVehicleId(null);
-                  setSelectedStopId(stop.stop_id);
-                }}
-              >
-                <View style={[styles.stopDot, isFocused && styles.stopDotActive]} />
-              </Marker>
-            );
-          })}
+          {showStops
+            ? stops.map((stop) => {
+                const latitude = Number(stop.stop_lat);
+                const longitude = Number(stop.stop_lon);
+                if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+                  return null;
+                }
+                const isFocused = selectedStopId === stop.stop_id;
+                return (
+                  <Marker
+                    key={`stop-${stop.stop_id}`}
+                    coordinate={{ latitude, longitude }}
+                    anchor={{ x: 0.5, y: 0.5 }}
+                    tracksViewChanges={false}
+                    onPress={(event) => {
+                      event.stopPropagation();
+                      setSelectedVehicleId(null);
+                      setSelectedStopId(stop.stop_id);
+                    }}
+                  >
+                    <View style={[styles.stopDot, isFocused && styles.stopDotActive]} />
+                  </Marker>
+                );
+              })
+            : null}
         </MapView>
 
         <View style={styles.timeOverlay}>
