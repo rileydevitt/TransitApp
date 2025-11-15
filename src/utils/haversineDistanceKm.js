@@ -1,7 +1,10 @@
+// Computes distance in kilometers between two lat/lon coordinates.
+
 import toRadians from './toRadians';
 
 const EARTH_RADIUS_KM = 6371;
 
+/** Calculates the great-circle distance in kilometers between two coords. */
 export default function haversineDistanceKm(lat1, lon1, lat2, lon2) {
   if (![lat1, lon1, lat2, lon2].every((value) => Number.isFinite(value))) {
     return NaN;

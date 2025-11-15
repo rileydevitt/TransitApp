@@ -1,3 +1,6 @@
+// Formats ISO timestamps into a human readable time of day.
+
+/** Formats a timestamp-ish input into HH:MM local time or a fallback string. */
 export default function formatTime(value) {
   try {
     const date = new Date(value);

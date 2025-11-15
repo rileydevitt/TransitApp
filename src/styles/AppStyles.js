@@ -1,3 +1,5 @@
+// Centralized React Native StyleSheet for the transit UI.
+
 import { StyleSheet, Platform } from 'react-native';
 
 const styles = StyleSheet.create({

@@ -1,5 +1,8 @@
+// Estimates minutes to a stop using distance and optional speed readings.
+
 const MIN_SPEED_KM_PER_MIN = 0.2; // ~12 km/h fallback
 
+/** Uses distance plus current speed to estimate minutes to the stop. */
 export default function estimateEtaToStop(distanceKm, speedMps) {
   if (!Number.isFinite(distanceKm)) {
     return null;

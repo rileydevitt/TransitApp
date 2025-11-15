@@ -1,3 +1,6 @@
+// Provides a coarse ETA from the realtime timestamp alone.
+
+/** Provides a fallback ETA purely from how recent the timestamp is. */
 export default function estimateEtaMinutes(timestampMs) {
   if (typeof timestampMs !== 'number') {
     return null;

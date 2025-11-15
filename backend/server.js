@@ -1,3 +1,5 @@
+// Simple Express server that serves GTFS static and realtime proxy endpoints.
+
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -5,8 +7,9 @@ const fs = require('fs');
 const StreamZip = require('node-stream-zip');
 const { parse } = require('csv-parse/sync');
 const GtfsRealtimeBindings = require('gtfs-realtime-bindings');
+const loadEnvFromFile = require('../loadEnv');
 
-loadEnvFromFile();
+loadEnvFromFile(path.join(__dirname, '..', '.env'));
 
 const STATIC_ZIP_PATH = path.join(__dirname, '..', 'google_transit.zip');
 const VEHICLE_POSITIONS_PATH = path.join(__dirname, '..', 'VehiclePositions.pb');
@@ -14,6 +17,7 @@ const VEHICLE_POSITIONS_URL = 'https://gtfs.halifax.ca/realtime/Vehicle/VehicleP
 
 const PORT = Number(process.env.PORT) || 4000;
 
+/** Spins up the Express server and wires API routes. */
 async function bootstrap() {
   const app = express();
   app.use(cors());
@@ -73,6 +77,7 @@ bootstrap().catch((error) => {
   process.exitCode = 1;
 });
 
+/** Reads the GTFS zip and returns structured routes/stops/trips/shapes. */
 async function loadStaticData() {
   console.log('Loading GTFS static data…');
   const zip = new StreamZip.async({ file: STATIC_ZIP_PATH });
@@ -148,6 +153,7 @@ async function loadStaticData() {
   }
 }
 
+/** Locates a file inside the GTFS zip regardless of directory casing. */
 function findEntry(entries, targetName) {
   const lower = targetName.toLowerCase();
   for (const [entryName, entry] of Object.entries(entries)) {
@@ -161,6 +167,7 @@ function findEntry(entries, targetName) {
   throw new Error(`Unable to locate ${targetName} inside GTFS zip.`);
 }
 
+/** Parses a GTFS CSV file into an array of objects. */
 function parseCsv(contents) {
   return parse(contents, {
     columns: true,
@@ -169,6 +176,7 @@ function parseCsv(contents) {
   });
 }
 
+/** Downloads the realtime vehicle feed and normalizes each entity. */
 async function loadVehiclePositions() {
   const buffer = await readVehicleFeedBuffer();
   const feed = GtfsRealtimeBindings.transit_realtime.FeedMessage.decode(buffer);
@@ -203,6 +211,7 @@ async function loadVehiclePositions() {
     });
 }
 
+/** Fetches the raw protobuf feed either from remote URL or disk. */
 async function readVehicleFeedBuffer() {
   if (VEHICLE_POSITIONS_URL) {
     const response = await fetch(VEHICLE_POSITIONS_URL);
@@ -215,11 +224,13 @@ async function readVehicleFeedBuffer() {
   return fs.promises.readFile(VEHICLE_POSITIONS_PATH);
 }
 
+/** Parses floats but returns null when the input is invalid. */
 function parseFloatSafe(value) {
   const number = Number.parseFloat(value);
   return Number.isFinite(number) ? number : null;
 }
 
+/** Parses integers but returns null for blank or invalid strings. */
 function parseIntSafe(value) {
   if (value == null || value === '') {
     return null;
@@ -228,28 +239,4 @@ function parseIntSafe(value) {
   return Number.isFinite(number) ? number : null;
 }
 
-function loadEnvFromFile() {
-  const envPath = path.join(__dirname, '..', '.env');
-  if (!fs.existsSync(envPath)) {
-    return;
-  }
-
-  const contents = fs.readFileSync(envPath, 'utf8');
-  contents
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .forEach((line) => {
-      if (!line || line.startsWith('#')) {
-        return;
-      }
-      const equalsIndex = line.indexOf('=');
-      if (equalsIndex === -1) {
-        return;
-      }
-      const key = line.slice(0, equalsIndex).trim();
-      const value = line.slice(equalsIndex + 1).trim();
-      if (key && !(key in process.env)) {
-        process.env[key] = value;
-      }
-    });
-}
+/** Loads .env key/value pairs when running the backend locally. */

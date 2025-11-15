@@ -1,5 +1,8 @@
+// Resolves the backend API base URL based on environment variables.
+
 import Constants from 'expo-constants';
 
+/** Determines the backend base URL from Expo config or defaults. */
 export default function resolveApiBaseUrl() {
   if (process.env.EXPO_PUBLIC_API_BASE_URL) {
     return process.env.EXPO_PUBLIC_API_BASE_URL;

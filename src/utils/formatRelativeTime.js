@@ -1,3 +1,6 @@
+// Produces a friendly relative timestamp string (e.g., minutes ago).
+
+/** Returns a short label like “5m ago” from a millisecond timestamp. */
 export default function formatRelativeTime(timestampMs) {
   if (typeof timestampMs !== 'number') {
     return null;

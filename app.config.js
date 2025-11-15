@@ -1,5 +1,6 @@
-const fs = require('fs');
-const path = require('path');
+// Expo app configuration describing bundle settings and environment.
+
+const loadEnvFromFile = require('./loadEnv');
 
 loadEnvFromFile();
 
@@ -15,6 +16,7 @@ const mapsKey =
 
 const resolvedBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
 
+/** Builds the Expo config object with resolved secrets and map keys. */
 module.exports = () => ({
   ...baseConfig,
   expo: {
@@ -43,28 +45,4 @@ module.exports = () => ({
   }
 });
 
-function loadEnvFromFile() {
-  const envPath = path.join(__dirname, '.env');
-  if (!fs.existsSync(envPath)) {
-    return;
-  }
-
-  const contents = fs.readFileSync(envPath, 'utf8');
-  contents
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .forEach((line) => {
-      if (!line || line.startsWith('#')) {
-        return;
-      }
-      const separatorIndex = line.indexOf('=');
-      if (separatorIndex === -1) {
-        return;
-      }
-      const key = line.slice(0, separatorIndex).trim();
-      const value = line.slice(separatorIndex + 1).trim();
-      if (key && !(key in process.env)) {
-        process.env[key] = value;
-      }
-    });
-}
+/** Hydrates process.env from the project root .env file. */

@@ -1,3 +1,5 @@
+// Google Maps dark-mode style definition used for the custom basemap.
+
 const DARK_MAP_STYLE = [
   { elementType: 'geometry', stylers: [{ color: '#1c2834' }] },
   { elementType: 'labels.text.stroke', stylers: [{ color: '#1c2834' }] },
