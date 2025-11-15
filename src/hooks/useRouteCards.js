@@ -5,6 +5,8 @@ import estimateEtaMinutes from '../utils/estimateEtaMinutes.js';
 import formatRelativeTime from '../utils/formatRelativeTime.js';
 
 /** Builds up to five route cards combining realtime vehicles and static data. */
+const MAX_ROUTE_CARDS = 15;
+
 export default function useRouteCards({ vehicles, routes, routesById, stopsById, tripsById, staleVehicles }) {
   return useMemo(() => {
     const items = [];
@@ -36,7 +38,7 @@ export default function useRouteCards({ vehicles, routes, routesById, stopsById,
     });
 
     if (items.length === 0) {
-      return routes.slice(0, 5).map((route, index) => ({
+      return routes.slice(0, MAX_ROUTE_CARDS).map((route, index) => ({
         id: route.route_id ?? `route-${index}`,
         routeId: route.route_id ?? null,
         routeLabel: route.route_short_name ?? route.route_long_name ?? `Route ${index + 1}`,
@@ -50,6 +52,6 @@ export default function useRouteCards({ vehicles, routes, routesById, stopsById,
       }));
     }
 
-    return items.slice(0, 5);
+    return items.slice(0, MAX_ROUTE_CARDS);
   }, [routes, routesById, staleVehicles, stopsById, tripsById, vehicles]);
 }

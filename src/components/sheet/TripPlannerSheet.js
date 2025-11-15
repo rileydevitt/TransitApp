@@ -28,6 +28,7 @@ const BASE_EXPANDED_DRAWER_TRANSLATE = Platform.select({ ios: 90, android: 110, 
 const DEFAULT_COLLAPSED_DRAWER_TRANSLATE = Platform.select({ ios: 300, android: 320, default: 300 });
 const MAX_DRAWER_COVERAGE = 0.9;
 const MIN_TOP_GAP = WINDOW_HEIGHT * (1 - MAX_DRAWER_COVERAGE);
+const MAX_SHEET_HEIGHT = WINDOW_HEIGHT;
 
 /** Bottom sheet that surfaces search, routes, and stop arrivals. */
 export default function TripPlannerSheet({
@@ -56,11 +57,12 @@ export default function TripPlannerSheet({
       return DEFAULT_COLLAPSED_DRAWER_TRANSLATE;
     }
     const visibleTarget = WINDOW_HEIGHT * 0.33;
-    const translate = sheetHeight - visibleTarget;
+    const clampedHeight = Math.min(sheetHeight, MAX_SHEET_HEIGHT);
+    const translate = clampedHeight - visibleTarget;
     return clamp(
       translate,
       expandedDrawerTranslate,
-      Math.max(sheetHeight, DEFAULT_COLLAPSED_DRAWER_TRANSLATE)
+      Math.max(clampedHeight, DEFAULT_COLLAPSED_DRAWER_TRANSLATE)
     );
   }, [expandedDrawerTranslate, sheetHeight]);
 
@@ -195,6 +197,7 @@ function RouteList({ routes, onSelect, activeRouteId }) {
       contentContainerStyle={styles.routesList}
       ItemSeparatorComponent={() => <View style={styles.routeDivider} />}
       renderItem={renderItem}
+      style={{ height: WINDOW_HEIGHT * 0.55 }}
     />
   );
 }
@@ -271,6 +274,7 @@ function StopDetails({ stop, stopId, onClear, arrivals }) {
         contentContainerStyle={styles.routesList}
         ListEmptyComponent={<NoArrivalsState />}
         renderItem={({ item }) => <StopArrivalCard arrival={item} />}
+        style={{ maxHeight: WINDOW_HEIGHT * 0.55 }}
       />
     </>
   );
