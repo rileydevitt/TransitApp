@@ -113,7 +113,8 @@ export default function TransitScreen() {
     routesById,
     stopsById,
     tripsById,
-    staleVehicles
+    staleVehicles,
+    userLocation
   });
   const { scheduledArrivals } = useStopSchedule(selectedStopId, API_BASE_URL);
 
