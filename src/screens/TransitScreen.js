@@ -36,6 +36,7 @@ const API_BASE_URL = resolveApiBaseUrl();
 /** Main screen responsible for orchestrating map + drawer UI and data hooks. */
 export default function TransitScreen() {
   const [selectedStopId, setSelectedStopId] = useState(null);
+  const [routeDirections, setRouteDirections] = useState(new Map());
   const mapRef = useRef(null);
   const sheetRef = useRef(null);
 
@@ -114,7 +115,8 @@ export default function TransitScreen() {
     stopsById,
     tripsById,
     staleVehicles,
-    userLocation
+    userLocation,
+    routeDirections
   });
   const { scheduledArrivals } = useStopSchedule(selectedStopId, API_BASE_URL);
 
@@ -153,6 +155,17 @@ export default function TransitScreen() {
 
   const handleSearchPress = useCallback(() => {
     sheetRef.current?.expand();
+  }, []);
+
+  const handleRouteDirectionChange = useCallback((routeId, directionId) => {
+    if (!routeId || typeof directionId !== 'number') {
+      return;
+    }
+    setRouteDirections((prev) => {
+      const next = new Map(prev);
+      next.set(routeId, directionId);
+      return next;
+    });
   }, []);
 
   const statusBanner = useStatusBannerMessage({ staticError, realtimeError, locationError });
@@ -196,6 +209,7 @@ export default function TransitScreen() {
           ref={sheetRef}
           routeCards={routeCards}
           onRouteSelect={handleRouteSelect}
+          onRouteDirectionChange={handleRouteDirectionChange}
           activeRouteId={activeRouteId}
           scheduledArrivals={scheduledArrivals}
           isStopFocused={isStopFocused}

@@ -234,6 +234,20 @@ const styles = StyleSheet.create({
     color: '#8aa2c8',
     fontSize: 13
   },
+  directionHint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8
+  },
+  directionHintIcon: {
+    marginRight: 6,
+    opacity: 0.7
+  },
+  directionHintText: {
+    color: '#6f86a8',
+    fontSize: 12,
+    fontWeight: '600'
+  },
   routeUpdated: {
     color: '#5f7397',
     fontSize: 11,

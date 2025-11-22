@@ -34,6 +34,7 @@ const MAX_SHEET_HEIGHT = WINDOW_HEIGHT;
 const TripPlannerSheet = forwardRef(function TripPlannerSheet({
   routeCards,
   onRouteSelect,
+  onRouteDirectionChange,
   activeRouteId,
   scheduledArrivals,
   isStopFocused,
@@ -158,19 +159,25 @@ const TripPlannerSheet = forwardRef(function TripPlannerSheet({
           arrivals={scheduledArrivals}
         />
       ) : (
-        <RouteList routes={routeCards} onSelect={onRouteSelect} activeRouteId={activeRouteId} />
+        <RouteList
+          routes={routeCards}
+          onSelect={onRouteSelect}
+          activeRouteId={activeRouteId}
+          onDirectionChange={onRouteDirectionChange}
+        />
       )}
     </Animated.View>
   );
 });
 
 /** Displays the primary list of route cards within the sheet. */
-function RouteList({ routes, onSelect, activeRouteId }) {
+function RouteList({ routes, onSelect, activeRouteId, onDirectionChange }) {
   const renderItem = ({ item }) => (
     <RouteCard
       route={item}
       isActive={Boolean(activeRouteId && item.routeId === activeRouteId)}
       onSelect={onSelect}
+      onDirectionChange={onDirectionChange}
     />
   );
 
@@ -188,17 +195,72 @@ function RouteList({ routes, onSelect, activeRouteId }) {
 }
 
 /** Single route card element showing ETA + metadata. */
-function RouteCard({ route, isActive, onSelect }) {
-  return (
-    <TouchableOpacity
-      style={[styles.routeCard, isActive && styles.routeCardActive]}
-      activeOpacity={0.85}
-      onPress={() => {
-        if (route.vehicleId) {
-          onSelect(route.vehicleId);
+function RouteCard({ route, isActive, onSelect, onDirectionChange }) {
+  const showDirections = Array.isArray(route.directionOptions) && route.directionOptions.length > 1;
+
+  const swipeX = useRef(new Animated.Value(0)).current;
+
+  const resetSwipe = useCallback(() => {
+    Animated.spring(swipeX, {
+      toValue: 0,
+      useNativeDriver: true,
+      damping: 16,
+      stiffness: 240,
+      mass: 0.7
+    }).start();
+  }, [swipeX]);
+
+  const cycleDirection = useCallback(() => {
+    if (!showDirections || !onDirectionChange || route.routeId == null) {
+      return;
+    }
+    const options = route.directionOptions.slice(0, 2);
+    const currentIndex = options.findIndex((opt) => opt.id === route.selectedDirectionId);
+    const nextIndex = currentIndex === -1 ? 0 : (currentIndex + 1) % options.length;
+    const next = options[nextIndex];
+    if (next && next.id !== route.selectedDirectionId) {
+      onDirectionChange(route.routeId, next.id);
+    }
+  }, [onDirectionChange, route.directionOptions, route.routeId, route.selectedDirectionId, showDirections]);
+
+  const cardPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_, gesture) =>
+      showDirections &&
+      Math.abs(gesture.dx) > 10 &&
+      Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.2,
+      onPanResponderMove: (_, gesture) => {
+        if (!showDirections) {
+          return;
         }
-      }}
+        const next = clamp(gesture.dx, -32, 32);
+        swipeX.setValue(next);
+      },
+      onPanResponderRelease: (_, gesture) => {
+        if (showDirections && Math.abs(gesture.dx) > 20 && Math.abs(gesture.dx) > Math.abs(gesture.dy)) {
+          cycleDirection();
+        }
+        resetSwipe();
+      }
+    }),
+    [cycleDirection, resetSwipe, showDirections, swipeX]
+  );
+
+  return (
+    <Animated.View
+      {...(showDirections ? cardPanResponder.panHandlers : {})}
+      style={showDirections ? { transform: [{ translateX: swipeX }] } : null}
     >
+      <TouchableOpacity
+        style={[styles.routeCard, isActive && styles.routeCardActive]}
+        activeOpacity={0.85}
+        onPress={() => {
+          if (route.vehicleId) {
+            onSelect(route.vehicleId);
+          }
+        }}
+      >
       <View style={styles.routeBadgeColumn}>
         <Text style={[styles.routeBadgeText, isActive && styles.routeBadgeTextActive]}>
           {route.routeLabel}
@@ -220,6 +282,12 @@ function RouteCard({ route, isActive, onSelect }) {
           {route.stopLabel}
         </Text>
         {route.updatedLabel ? <Text style={styles.routeUpdated}>{route.updatedLabel}</Text> : null}
+        {showDirections ? (
+          <View style={styles.directionHint}>
+            <Ionicons name="swap-horizontal" size={14} color="#7a8fa6" style={styles.directionHintIcon} />
+            <Text style={styles.directionHintText}>Swipe to flip direction</Text>
+          </View>
+        ) : null}
       </View>
       <View style={styles.routeMeta}>
         <Text style={[styles.etaText, isActive && styles.etaTextActive]}>
@@ -232,7 +300,8 @@ function RouteCard({ route, isActive, onSelect }) {
           color={route.isStale ? '#7a8fa6' : '#77f0ff'}
         />
       </View>
-    </TouchableOpacity>
+      </TouchableOpacity>
+    </Animated.View>
   );
 }
 

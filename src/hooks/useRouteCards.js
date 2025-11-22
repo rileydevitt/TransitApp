@@ -7,6 +7,10 @@ import haversineDistanceKm from '../utils/haversineDistanceKm.js';
 import estimateEtaToStop from '../utils/estimateEtaToStop.js';
 
 const escapeRegExp = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const normalizeDirection = (value) => {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+};
 
 const cleanHeadsign = (headsign, routeLabel) => {
   if (!headsign || !routeLabel) {
@@ -27,10 +31,23 @@ export default function useRouteCards({
   stopsById,
   tripsById,
   staleVehicles,
-  userLocation
+  userLocation,
+  routeDirections
 }) {
   return useMemo(() => {
-    const seenRoutes = new Set();
+    const directionLookup = new Map();
+    tripsById.forEach((trip) => {
+      const dirId = normalizeDirection(trip?.direction_id);
+      if (!trip?.route_id || dirId === null) {
+        return;
+      }
+      const routeDirectionsMap = directionLookup.get(trip.route_id) ?? new Map();
+      if (!routeDirectionsMap.has(dirId) && trip.trip_headsign) {
+        routeDirectionsMap.set(dirId, trip.trip_headsign);
+      }
+      directionLookup.set(trip.route_id, routeDirectionsMap);
+    });
+
     const stopBuckets = new Map();
     const cardsWithoutLocation = [];
     const stopsArray = Array.from(stopsById.values());
@@ -131,7 +148,10 @@ export default function useRouteCards({
         vehicleId: vehicle.id,
         isStale: staleVehicles.has(vehicle.id),
         updatedLabel: vehicle.timestampMs ? formatRelativeTime(vehicle.timestampMs) : null,
-        distanceKm
+        distanceKm,
+        directionId: normalizeDirection(
+          typeof vehicle.directionId === 'number' ? vehicle.directionId : trip?.direction_id
+        )
       };
 
       if (Number.isFinite(distanceKm)) {
@@ -149,43 +169,14 @@ export default function useRouteCards({
       }
     });
 
-    // Start from the closest stops and keep expanding outward until full.
-    const sortedBuckets = Array.from(stopBuckets.values()).sort(
-      (a, b) => a.distanceKm - b.distanceKm
-    );
+    const sortedBuckets = Array.from(stopBuckets.values()).sort((a, b) => a.distanceKm - b.distanceKm);
+    const orderedCandidates = [];
+    sortedBuckets.forEach((bucket) => {
+      bucket.cards.forEach((card) => orderedCandidates.push(card));
+    });
+    cardsWithoutLocation.forEach((card) => orderedCandidates.push(card));
 
-    const prioritizedCards = [];
-    for (const bucket of sortedBuckets) {
-      for (const card of bucket.cards) {
-        if (seenRoutes.has(card.id)) {
-          continue;
-        }
-        seenRoutes.add(card.id);
-        prioritizedCards.push(card);
-        if (prioritizedCards.length >= MAX_ROUTE_CARDS) {
-          break;
-        }
-      }
-      if (prioritizedCards.length >= MAX_ROUTE_CARDS) {
-        break;
-      }
-    }
-
-    // If there are still slots, fill with any remaining vehicles lacking stop distance.
-    if (prioritizedCards.length < MAX_ROUTE_CARDS) {
-      for (const card of cardsWithoutLocation) {
-        if (seenRoutes.has(card.id)) {
-          continue;
-        }
-        seenRoutes.add(card.id);
-        prioritizedCards.push(card);
-        if (prioritizedCards.length >= MAX_ROUTE_CARDS) {
-          break;
-        }
-      }
-    }
-
-    if (prioritizedCards.length === 0) {
+    if (orderedCandidates.length === 0) {
       return routes.slice(0, MAX_ROUTE_CARDS).map((route, index) => ({
         id: route.route_id ?? `route-${index}`,
         routeId: route.route_id ?? null,
@@ -200,6 +191,70 @@ export default function useRouteCards({
       }));
     }
 
-    return prioritizedCards.slice(0, MAX_ROUTE_CARDS);
-  }, [routes, routesById, staleVehicles, stopsById, tripsById, userLocation, vehicles]);
+    const candidatesByRoute = new Map();
+    orderedCandidates.forEach((card, index) => {
+      const routeKey = card.routeId ?? card.id;
+      if (!routeKey) {
+        return;
+      }
+      const routeEntries = candidatesByRoute.get(routeKey) ?? [];
+      routeEntries.push({ card, index });
+      candidatesByRoute.set(routeKey, routeEntries);
+    });
+
+    const finalCards = [];
+    for (const [routeKey, entries] of candidatesByRoute.entries()) {
+      const directionOptions = [];
+      const directionMap = routeKey ? directionLookup.get(routeKey) ?? null : null;
+      if (directionMap) {
+        directionMap.forEach((label, dirId) => {
+          directionOptions.push({
+            id: dirId,
+            label,
+            hasRealtime: entries.some((entry) => entry.card.directionId === dirId)
+          });
+        });
+      } else {
+        const uniqueDirections = new Set(entries.map((entry) => entry.card.directionId).filter((id) => id !== null));
+        if (uniqueDirections.size > 0) {
+          uniqueDirections.forEach((dirId) => {
+            directionOptions.push({
+              id: dirId,
+              label: `Direction ${dirId}`,
+              hasRealtime: true
+            });
+          });
+        }
+      }
+
+      const preferredDirection = normalizeDirection(
+        routeDirections?.get?.(routeKey) ??
+          routeDirections?.get?.(String(routeKey)) ??
+          routeDirections?.get?.(Number(routeKey))
+      );
+
+      const desiredDirection =
+        preferredDirection ??
+        (directionOptions.find((opt) => opt.hasRealtime)?.id ??
+          directionOptions[0]?.id ??
+          entries[0]?.card.directionId ??
+          null);
+
+      const chosen =
+        entries.find((entry) => entry.card.directionId === desiredDirection) ??
+        entries[0];
+
+      const chosenCard = {
+        ...chosen.card,
+        selectedDirectionId: desiredDirection,
+        directionOptions
+      };
+
+      const baseOrder = entries[0]?.index ?? 0;
+      finalCards.push({ card: chosenCard, order: baseOrder });
+    }
+
+    finalCards.sort((a, b) => a.order - b.order);
+    return finalCards.slice(0, MAX_ROUTE_CARDS).map((entry) => entry.card);
+  }, [routeDirections, routes, routesById, staleVehicles, stopsById, tripsById, userLocation, vehicles]);
 }
