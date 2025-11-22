@@ -9,5 +9,8 @@ export default function estimateEtaToStop(distanceKm, speedMps) {
   }
   const speedKmPerMin = speedMps ? (speedMps * 3.6) / 60 : 0.5;
   const minutes = distanceKm / Math.max(speedKmPerMin, MIN_SPEED_KM_PER_MIN);
+  if (minutes < 1) {
+    return 0;
+  }
   return Math.max(1, Math.round(minutes));
 }

@@ -7,7 +7,8 @@ import React, {
   useImperativeHandle,
   useMemo,
   useRef,
-  useState
+  useState,
+  memo
 } from 'react';
 import {
   Animated,
@@ -173,7 +174,7 @@ const TripPlannerSheet = forwardRef(function TripPlannerSheet({
 /** Displays the primary list of route cards within the sheet. */
 function RouteList({ routes, onSelect, activeRouteId, onDirectionChange }) {
   const renderItem = ({ item }) => (
-    <RouteCard
+    <MemoRouteCard
       route={item}
       isActive={Boolean(activeRouteId && item.routeId === activeRouteId)}
       onSelect={onSelect}
@@ -190,6 +191,10 @@ function RouteList({ routes, onSelect, activeRouteId, onDirectionChange }) {
       ItemSeparatorComponent={() => <View style={styles.routeDivider} />}
       renderItem={renderItem}
       style={{ height: WINDOW_HEIGHT * 0.55 }}
+      removeClippedSubviews
+      initialNumToRender={6}
+      maxToRenderPerBatch={6}
+      windowSize={7}
     />
   );
 }
@@ -291,7 +296,7 @@ function RouteCard({ route, isActive, onSelect, onDirectionChange }) {
       </View>
       <View style={styles.routeMeta}>
         <Text style={[styles.etaText, isActive && styles.etaTextActive]}>
-          {route.etaMinutes ? `${route.etaMinutes}` : '—'}
+          {Number.isFinite(route.etaMinutes) ? `${route.etaMinutes}` : '—'}
         </Text>
         <Text style={styles.etaCaption}>minutes</Text>
         <MaterialCommunityIcons
@@ -304,6 +309,15 @@ function RouteCard({ route, isActive, onSelect, onDirectionChange }) {
     </Animated.View>
   );
 }
+
+const MemoRouteCard = memo(RouteCard, (prev, next) => {
+  return (
+    prev.isActive === next.isActive &&
+    prev.route === next.route &&
+    prev.onSelect === next.onSelect &&
+    prev.onDirectionChange === next.onDirectionChange
+  );
+});
 
 /** Stop-focused view with header and arrivals list. */
 function StopDetails({ stop, stopId, onClear, arrivals }) {
@@ -331,6 +345,10 @@ function StopDetails({ stop, stopId, onClear, arrivals }) {
         ListEmptyComponent={<NoArrivalsState />}
         renderItem={({ item }) => <ScheduledArrivalCard arrival={item} />}
         style={{ maxHeight: WINDOW_HEIGHT * 0.55 }}
+        removeClippedSubviews
+        initialNumToRender={6}
+        maxToRenderPerBatch={6}
+        windowSize={7}
       />
     </>
   );

@@ -3,6 +3,20 @@
 import { useEffect, useState } from 'react';
 import isFiniteNumber from '../utils/isFiniteNumber.js';
 
+const vehiclesEqual = (a, b) => {
+  if (a.length !== b.length) {
+    return false;
+  }
+  for (let i = 0; i < a.length; i += 1) {
+    const va = a[i];
+    const vb = b[i];
+    if (va.id !== vb.id || va.timestampMs !== vb.timestampMs) {
+      return false;
+    }
+  }
+  return true;
+};
+
 /** Polls realtime vehicle feed on a fixed interval and normalizes responses. */
 export default function useRealtimeVehicles(apiBaseUrl, refreshIntervalMs) {
   const [vehicles, setVehicles] = useState([]);
@@ -52,7 +66,7 @@ export default function useRealtimeVehicles(apiBaseUrl, refreshIntervalMs) {
             };
           });
 
-        setVehicles(nowVehicles);
+        setVehicles((prev) => (vehiclesEqual(prev, nowVehicles) ? prev : nowVehicles));
         setError(null);
       } catch (fetchError) {
         if (cancelled || fetchError.name === 'AbortError') {

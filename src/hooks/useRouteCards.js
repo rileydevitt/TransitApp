@@ -129,9 +129,11 @@ export default function useRouteCards({
           ? haversineDistanceKm(vehicle.latitude, vehicle.longitude, stop.stop_lat, stop.stop_lon)
           : null;
 
-      const etaMinutes = Number.isFinite(stopDistanceKm)
+      const etaMinutesRaw = Number.isFinite(stopDistanceKm)
         ? estimateEtaToStop(stopDistanceKm, vehicle.speed)
         : estimateEtaMinutes(vehicle.timestampMs);
+      const etaMinutes =
+        etaMinutesRaw == null ? null : etaMinutesRaw < 1 ? 0 : etaMinutesRaw;
 
       const routeLabel =
         route?.route_short_name ?? route?.route_long_name ?? vehicle.routeId ?? 'Route';
@@ -170,11 +172,35 @@ export default function useRouteCards({
     });
 
     const sortedBuckets = Array.from(stopBuckets.values()).sort((a, b) => a.distanceKm - b.distanceKm);
-    const orderedCandidates = [];
-    sortedBuckets.forEach((bucket) => {
-      bucket.cards.forEach((card) => orderedCandidates.push(card));
+    const primaryBuckets = sortedBuckets.slice(0, 5);
+    const secondaryBuckets = sortedBuckets.slice(5);
+
+    const primaryCandidates = [];
+    primaryBuckets.forEach((bucket) => {
+      bucket.cards.forEach((card) =>
+        primaryCandidates.push({ card, index: primaryCandidates.length, isPrimary: true })
+      );
     });
-    cardsWithoutLocation.forEach((card) => orderedCandidates.push(card));
+
+    const secondaryCandidates = [];
+    secondaryBuckets.forEach((bucket) => {
+      bucket.cards.forEach((card) =>
+        secondaryCandidates.push({
+          card,
+          index: primaryCandidates.length + secondaryCandidates.length,
+          isPrimary: false
+        })
+      );
+    });
+    cardsWithoutLocation.forEach((card) =>
+      secondaryCandidates.push({
+        card,
+        index: primaryCandidates.length + secondaryCandidates.length,
+        isPrimary: false
+      })
+    );
+
+    const orderedCandidates = [...primaryCandidates, ...secondaryCandidates];
 
     if (orderedCandidates.length === 0) {
       return routes.slice(0, MAX_ROUTE_CARDS).map((route, index) => ({
@@ -192,13 +218,13 @@ export default function useRouteCards({
     }
 
     const candidatesByRoute = new Map();
-    orderedCandidates.forEach((card, index) => {
+    orderedCandidates.forEach(({ card, index, isPrimary }) => {
       const routeKey = card.routeId ?? card.id;
       if (!routeKey) {
         return;
       }
       const routeEntries = candidatesByRoute.get(routeKey) ?? [];
-      routeEntries.push({ card, index });
+      routeEntries.push({ card, index, isPrimary });
       candidatesByRoute.set(routeKey, routeEntries);
     });
 
@@ -251,10 +277,17 @@ export default function useRouteCards({
       };
 
       const baseOrder = entries[0]?.index ?? 0;
-      finalCards.push({ card: chosenCard, order: baseOrder });
+      const isPrimary = entries.some((entry) => entry.isPrimary);
+      finalCards.push({ card: chosenCard, order: baseOrder, isPrimary });
     }
 
     finalCards.sort((a, b) => a.order - b.order);
+
+    const primaryCards = finalCards.filter((entry) => entry.isPrimary);
+    if (primaryCards.length > 0) {
+      return primaryCards.map((entry) => entry.card);
+    }
+
     return finalCards.slice(0, MAX_ROUTE_CARDS).map((entry) => entry.card);
   }, [routeDirections, routes, routesById, staleVehicles, stopsById, tripsById, userLocation, vehicles]);
 }

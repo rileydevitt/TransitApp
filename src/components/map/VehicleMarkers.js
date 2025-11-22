@@ -1,12 +1,12 @@
 // Presentation component that draws markers for each vehicle.
 
-import React from 'react';
+import React, { memo } from 'react';
 import { Marker } from 'react-native-maps';
 import { Text, View } from 'react-native';
 import styles from '../../styles/AppStyles.js';
 
 /** Renders vehicle markers with labels and selection handling. */
-export default function VehicleMarkers({
+const VehicleMarkers = memo(function VehicleMarkers({
   vehicles,
   routesById,
   staleVehicles,
@@ -32,6 +32,7 @@ export default function VehicleMarkers({
         }}
         pinColor={isSelected ? '#FF9900' : '#00558C'}
         opacity={staleVehicles.has(vehicle.id) ? 0.5 : 1}
+        tracksViewChanges={false}
         onPress={() => onSelect(vehicle.id)}
       >
         <View style={styles.markerLabel}>
@@ -40,4 +41,6 @@ export default function VehicleMarkers({
       </Marker>
     );
   });
-}
+});
+
+export default VehicleMarkers;

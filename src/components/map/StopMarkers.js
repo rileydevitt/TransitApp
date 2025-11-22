@@ -1,12 +1,12 @@
 // Presentation component that renders stop markers for the visible subset.
 
-import React from 'react';
+import React, { memo } from 'react';
 import { Marker } from 'react-native-maps';
 import { View } from 'react-native';
 import styles from '../../styles/AppStyles.js';
 
 /** Renders the currently visible transit stops as map markers. */
-export default function StopMarkers({ stops, selectedStopId, onSelect }) {
+const StopMarkers = memo(function StopMarkers({ stops, selectedStopId, onSelect }) {
   if (!stops.length) {
     return null;
   }
@@ -33,4 +33,6 @@ export default function StopMarkers({ stops, selectedStopId, onSelect }) {
       </Marker>
     );
   });
-}
+});
+
+export default StopMarkers;
