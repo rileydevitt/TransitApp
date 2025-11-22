@@ -31,6 +31,42 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: 12
   },
+  pinnedSection: {
+    marginTop: 8,
+    marginBottom: 12
+  },
+  pinnedTitle: {
+    color: '#7a8fa6',
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 6,
+    textTransform: 'uppercase'
+  },
+  pinnedGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-between'
+  },
+  pinnedTile: {
+    flex: 1,
+    height: 48,
+    marginRight: 8,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  pinnedTileFilled: {
+    backgroundColor: '#2c6fd6'
+  },
+  pinnedTileEmpty: {
+    borderColor: '#2c6fd6',
+    borderWidth: 1,
+    backgroundColor: 'rgba(44, 111, 214, 0.08)'
+  },
+  pinnedText: {
+    color: '#f3f6ff',
+    fontSize: 18,
+    fontWeight: '800'
+  },
   busMarkerContainer: {
     alignItems: 'center'
   },

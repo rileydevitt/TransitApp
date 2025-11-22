@@ -30,6 +30,7 @@ import useVisibleStopsList from '../hooks/useVisibleStopsList.js';
 import useRouteCards from '../hooks/useRouteCards.js';
 import useStopSchedule from '../hooks/useStopSchedule.js';
 import useStatusBannerMessage from '../hooks/useStatusBannerMessage.js';
+import usePinnedRoutes from '../hooks/usePinnedRoutes.js';
 
 const API_BASE_URL = resolveApiBaseUrl();
 
@@ -37,8 +38,10 @@ const API_BASE_URL = resolveApiBaseUrl();
 export default function TransitScreen() {
   const [selectedStopId, setSelectedStopId] = useState(null);
   const [routeDirections, setRouteDirections] = useState(new Map());
+  const [priorityRouteId, setPriorityRouteId] = useState(null);
   const mapRef = useRef(null);
   const sheetRef = useRef(null);
+  const { pinnedRoutes, slots: pinnedSlots, togglePin } = usePinnedRoutes();
 
   const {
     routes,
@@ -118,6 +121,43 @@ export default function TransitScreen() {
     userLocation,
     routeDirections
   });
+  const augmentedRouteCards = useMemo(() => {
+    const byId = new Map(routeCards.map((card) => [card.routeId, card]));
+    const missingPinned = [];
+    pinnedRoutes.forEach((pin) => {
+      if (pin?.routeId && !byId.has(pin.routeId)) {
+        const route = routesById.get(pin.routeId);
+        missingPinned.push({
+          id: pin.routeId,
+          routeId: pin.routeId,
+          routeLabel: pin.routeLabel ?? route?.route_short_name ?? route?.route_long_name ?? 'Route',
+          headsign: route?.route_long_name ?? 'Pinned route',
+          stopLabel: 'No arrivals yet',
+          etaMinutes: null,
+          warning: null,
+          vehicleId: null,
+          isStale: false,
+          updatedLabel: null,
+          distanceKm: null,
+          directionId: null,
+          directionOptions: [],
+          selectedDirectionId: null
+        });
+      }
+    });
+    return [...routeCards, ...missingPinned];
+  }, [pinnedRoutes, routeCards, routesById]);
+  const prioritizedRouteCards = useMemo(() => {
+    if (!priorityRouteId) {
+      return augmentedRouteCards;
+    }
+    const index = augmentedRouteCards.findIndex((card) => card.routeId === priorityRouteId);
+    if (index <= 0) {
+      return augmentedRouteCards;
+    }
+    const target = augmentedRouteCards[index];
+    return [target, ...augmentedRouteCards.slice(0, index), ...augmentedRouteCards.slice(index + 1)];
+  }, [augmentedRouteCards, priorityRouteId]);
   const { scheduledArrivals } = useStopSchedule(selectedStopId, API_BASE_URL);
 
   const isStopFocused = Boolean(selectedStopId && selectedStop);
@@ -181,6 +221,35 @@ export default function TransitScreen() {
     });
   }, []);
 
+  const togglePinRoute = useCallback(
+    (route) => {
+      if (!route?.routeId) {
+        return;
+      }
+      togglePin(route);
+    },
+    [togglePin]
+  );
+
+  const handlePinnedPress = useCallback(
+    (routeId) => {
+      if (!routeId) {
+        return;
+      }
+      setPriorityRouteId(routeId);
+      const card = routeCards.find((item) => item.routeId === routeId);
+      if (card?.vehicleId) {
+        handleRouteSelect(card.vehicleId);
+        return;
+      }
+      const vehicle = vehicles.find((v) => v.routeId === routeId);
+      if (vehicle?.id) {
+        handleRouteSelect(vehicle.id);
+      }
+    },
+    [handleRouteSelect, routeCards, vehicles]
+  );
+
   const statusBanner = useStatusBannerMessage({ staticError, realtimeError, locationError });
 
   return (
@@ -221,9 +290,13 @@ export default function TransitScreen() {
 
         <TripPlannerSheet
           ref={sheetRef}
-          routeCards={routeCards}
+          routeCards={prioritizedRouteCards}
           onRouteSelect={handleRouteSelect}
           onRouteDirectionChange={handleRouteDirectionChange}
+          onRouteTogglePin={togglePinRoute}
+          onPinnedPress={handlePinnedPress}
+          pinnedRoutes={pinnedRoutes}
+          pinnedSlots={pinnedSlots}
           activeRouteId={activeRouteId}
           scheduledArrivals={scheduledArrivals}
           isStopFocused={isStopFocused}

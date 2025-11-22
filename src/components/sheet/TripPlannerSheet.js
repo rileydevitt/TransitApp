@@ -11,6 +11,7 @@ import React, {
   memo
 } from 'react';
 import {
+  Alert,
   Animated,
   Dimensions,
   FlatList,
@@ -36,6 +37,10 @@ const TripPlannerSheet = forwardRef(function TripPlannerSheet({
   routeCards,
   onRouteSelect,
   onRouteDirectionChange,
+  onPinnedPress,
+  onRouteTogglePin,
+  pinnedRoutes,
+  pinnedSlots,
   activeRouteId,
   scheduledArrivals,
   isStopFocused,
@@ -146,10 +151,16 @@ const TripPlannerSheet = forwardRef(function TripPlannerSheet({
       <View style={styles.sheetHandleArea} {...sheetPanResponder.panHandlers}>
         <View style={styles.sheetHandle} />
       </View>
-      <Text style={styles.sheetTitle}>Plan your trip</Text>
-
       {shapeError ? (
         <Text style={styles.sheetWarning}>Unable to load route shape: {shapeError}</Text>
+      ) : null}
+
+      {pinnedSlots && pinnedSlots.length ? (
+        <PinnedRoutes
+          slots={pinnedSlots}
+          onSelect={onPinnedPress}
+          onRemove={onRouteTogglePin}
+        />
       ) : null}
 
       {isStopFocused ? (
@@ -165,20 +176,78 @@ const TripPlannerSheet = forwardRef(function TripPlannerSheet({
           onSelect={onRouteSelect}
           activeRouteId={activeRouteId}
           onDirectionChange={onRouteDirectionChange}
+          onRouteTogglePin={onRouteTogglePin}
+          pinnedRoutes={pinnedRoutes}
         />
       )}
     </Animated.View>
   );
 });
 
+function PinnedRoutes({ slots, onSelect, onRemove }) {
+  return (
+    <View style={styles.pinnedSection}>
+      <Text style={styles.pinnedTitle}>Pinned routes</Text>
+      <View style={styles.pinnedGrid}>
+        {slots.map((slot, index) => (
+          <TouchableOpacity
+            key={`pinned-${index}-${slot?.routeId ?? 'empty'}`}
+            style={[styles.pinnedTile, slot ? styles.pinnedTileFilled : styles.pinnedTileEmpty]}
+            activeOpacity={slot ? 0.8 : 1}
+            onPress={() => {
+              if (slot?.routeId) {
+                onSelect(slot.routeId);
+              }
+            }}
+            onLongPress={() => {
+              if (!slot?.routeId || !onRemove) {
+                return;
+              }
+              Alert.alert(
+                'Remove pinned route?',
+                `${slot.routeLabel ?? 'Route'}`,
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  {
+                    text: 'Remove',
+                    style: 'destructive',
+                    onPress: () => onRemove({ routeId: slot.routeId, routeLabel: slot.routeLabel })
+                  }
+                ]
+              );
+            }}
+          >
+            <Text style={styles.pinnedText}>
+              {slot?.routeLabel ?? '+'}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+    </View>
+  );
+}
+
 /** Displays the primary list of route cards within the sheet. */
-function RouteList({ routes, onSelect, activeRouteId, onDirectionChange }) {
+function RouteList({
+  routes,
+  onSelect,
+  activeRouteId,
+  onDirectionChange,
+  onRouteTogglePin,
+  pinnedRoutes
+}) {
+  const pinnedSet = useMemo(
+    () => new Set((pinnedRoutes ?? []).map((route) => route.routeId)),
+    [pinnedRoutes]
+  );
   const renderItem = ({ item }) => (
     <MemoRouteCard
       route={item}
       isActive={Boolean(activeRouteId && item.routeId === activeRouteId)}
       onSelect={onSelect}
       onDirectionChange={onDirectionChange}
+      onTogglePin={onRouteTogglePin}
+      isPinned={pinnedSet.has(item.routeId)}
     />
   );
 
@@ -200,7 +269,7 @@ function RouteList({ routes, onSelect, activeRouteId, onDirectionChange }) {
 }
 
 /** Single route card element showing ETA + metadata. */
-function RouteCard({ route, isActive, onSelect, onDirectionChange }) {
+function RouteCard({ route, isActive, onSelect, onDirectionChange, onTogglePin, isPinned }) {
   const showDirections = Array.isArray(route.directionOptions) && route.directionOptions.length > 1;
 
   const swipeX = useRef(new Animated.Value(0)).current;
@@ -265,6 +334,19 @@ function RouteCard({ route, isActive, onSelect, onDirectionChange }) {
             onSelect(route.vehicleId);
           }
         }}
+        onLongPress={() => {
+          if (!onTogglePin) {
+            return;
+          }
+          Alert.alert(
+            isPinned ? 'Unpin route?' : 'Pin route?',
+            `${route.routeLabel ?? 'Route'}${route.headsign ? ` (${route.headsign})` : ''}`,
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: isPinned ? 'Unpin' : 'Pin', onPress: () => onTogglePin(route) }
+            ]
+          );
+        }}
       >
       <View style={styles.routeBadgeColumn}>
         <Text style={[styles.routeBadgeText, isActive && styles.routeBadgeTextActive]}>
@@ -314,6 +396,7 @@ const MemoRouteCard = memo(RouteCard, (prev, next) => {
   return (
     prev.isActive === next.isActive &&
     prev.route === next.route &&
+    prev.isPinned === next.isPinned &&
     prev.onSelect === next.onSelect &&
     prev.onDirectionChange === next.onDirectionChange
   );
