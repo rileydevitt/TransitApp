@@ -13,6 +13,7 @@ export default function TransitMap({
   initialRegion,
   customMapStyle,
   selectedRoute,
+  selectedDirectionId,
   selectedShapeCoordinates,
   routesById,
   vehicles,
@@ -47,7 +48,19 @@ export default function TransitMap({
       ) : null}
 
       <VehicleMarkers
-        vehicles={vehicles}
+        vehicles={
+          selectedRoute?.route_id
+            ? vehicles.filter((vehicle) => {
+                if (vehicle.routeId !== selectedRoute.route_id) {
+                  return false;
+                }
+                if (typeof selectedDirectionId === 'number') {
+                  return vehicle.directionId === selectedDirectionId;
+                }
+                return true;
+              })
+            : vehicles
+        }
         routesById={routesById}
         staleVehicles={staleVehicles}
         selectedVehicleId={selectedVehicleId}

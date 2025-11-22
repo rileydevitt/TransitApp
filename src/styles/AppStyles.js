@@ -31,6 +31,17 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: 12
   },
+  busMarkerContainer: {
+    alignItems: 'center'
+  },
+  busMarkerIcon: {
+    width: 34,
+    height: 34,
+    marginBottom: 4
+  },
+  busMarkerIconActive: {
+    transform: [{ scale: 1.05 }]
+  },
   stopDot: {
     width: 10,
     height: 10,

@@ -2,7 +2,8 @@
 
 import React, { memo } from 'react';
 import { Marker } from 'react-native-maps';
-import { Text, View } from 'react-native';
+import { Image } from 'react-native';
+import busIcon from '../../../bus_icon.png';
 import styles from '../../styles/AppStyles.js';
 
 /** Renders vehicle markers with labels and selection handling. */
@@ -30,14 +31,17 @@ const VehicleMarkers = memo(function VehicleMarkers({
           latitude: vehicle.latitude,
           longitude: vehicle.longitude
         }}
-        pinColor={isSelected ? '#FF9900' : '#00558C'}
+        anchor={{ x: 0.5, y: 0.5 }}
         opacity={staleVehicles.has(vehicle.id) ? 0.5 : 1}
-        tracksViewChanges={false}
+        tracksViewChanges
         onPress={() => onSelect(vehicle.id)}
+        title={displayLabel}
       >
-        <View style={styles.markerLabel}>
-          <Text style={styles.markerText}>{displayLabel}</Text>
-        </View>
+        <Image
+          source={busIcon}
+          style={[styles.busMarkerIcon, isSelected && styles.busMarkerIconActive]}
+          resizeMode="contain"
+        />
       </Marker>
     );
   });

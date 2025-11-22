@@ -126,6 +126,19 @@ export default function TransitScreen() {
     [selectedRoute, selectedVehicle]
   );
 
+  const activeRouteDirectionId = useMemo(() => {
+    if (!activeRouteId) {
+      return null;
+    }
+    const preferred = routeDirections.get(activeRouteId);
+    if (preferred !== undefined) {
+      return preferred;
+    }
+    return typeof selectedVehicle?.directionId === 'number'
+      ? selectedVehicle.directionId
+      : null;
+  }, [activeRouteId, routeDirections, selectedVehicle]);
+
   /** Clears any selected stop and collapses the drawer state. */
   const clearStopFocus = useCallback(() => setSelectedStopId(null), []);
 
@@ -189,6 +202,7 @@ export default function TransitScreen() {
           initialRegion={HALIFAX_REGION}
           customMapStyle={DARK_MAP_STYLE}
           selectedRoute={selectedRoute}
+          selectedDirectionId={activeRouteDirectionId}
           selectedShapeCoordinates={selectedShapeCoordinates}
           routesById={routesById}
           vehicles={vehicles}
